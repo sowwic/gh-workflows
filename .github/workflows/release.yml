@@ -28,10 +28,10 @@ jobs:
         env:
           CHANGELOG: ${{ inputs.changelog-path }}
         run: |
-          # Section body between the "<tag>" heading (+ underline) and the next "v<digit>" heading.
+          # Section body between the "<tag>" (or "v <version>") heading (+ underline) and the next "v<digit>" / "v <digit>" heading.
           awk -v tag="$GITHUB_REF_NAME" '
-            $0 == tag { found = 1; getline; next }
-            found && /^v[0-9]/ { exit }
+            $0 == tag || $0 == "v " substr(tag, 2) { found = 1; getline; next }
+            found && /^v ?[0-9]/ { exit }
             found { print }
           ' "$CHANGELOG" | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > "$RUNNER_TEMP/notes.txt"
           if [ ! -s "$RUNNER_TEMP/notes.txt" ]; then
