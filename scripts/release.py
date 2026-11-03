@@ -35,7 +35,9 @@ def changelog_has(version: str, changelog: pathlib.Path) -> bool:
         raise ReleaseError(f"Changelog not found: {changelog}")
     lines = changelog.read_text().splitlines()
     return any(
-        line == f"v{version}" and i + 1 < len(lines) and set(lines[i + 1]) == {"-"}
+        line in (f"v{version}", f"v {version}")
+        and i + 1 < len(lines)
+        and set(lines[i + 1]) == {"-"}
         for i, line in enumerate(lines)
     )
 
