@@ -1,0 +1,25 @@
+name: MkDocs deploy
+
+on:
+  workflow_call:
+    inputs:
+      command:
+        type: string
+        default: uv run mkdocs gh-deploy --force
+      python-version-file:
+        type: string
+        default: pyproject.toml
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: sowwic/gh-workflows/actions/setup-uv-project@v1
+        with:
+          python-version-file: ${{ inputs.python-version-file }}
+      - name: Deploy to GitHub Pages
+        run: ${{ inputs.command }}
