@@ -1,0 +1,74 @@
+name: Python tests
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        description: JSON list of runner OSes for the cheap (non-macOS) job.
+        type: string
+        default: '["ubuntu-latest", "windows-latest"]'
+      python-versions:
+        description: JSON list of Python versions for the cheap job.
+        type: string
+        default: '["3.12", "3.13", "3.14"]'
+      macos-python-versions:
+        description: JSON list of Python versions for macOS. Use [] to skip macOS.
+        type: string
+        default: '["3.12", "3.14"]'
+      apt-packages:
+        description: Space-separated apt packages to install on Linux.
+        type: string
+        default: ""
+      test-command:
+        type: string
+        default: uv run pytest tests
+      python-version-file:
+        type: string
+        default: pyproject.toml
+
+jobs:
+  # Cheap platforms first. A failure cancels siblings and skips the (10x more
+  # expensive) macOS job.
+  unit-tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        os: ${{ fromJSON(inputs.os) }}
+        python-version: ${{ fromJSON(inputs.python-versions) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: sowwic/gh-workflows/actions/setup-uv-project@v1
+        with:
+          python-version: ${{ matrix.python-version }}
+          python-version-file: ${{ inputs.python-version-file }}
+          apt-packages: ${{ inputs.apt-packages }}
+      - name: Run tests
+        shell: bash
+        env:
+          PYTHONFAULTHANDLER: "1"
+        run: ${{ inputs.test-command }}
+
+  # macOS minutes are billed at 10x: run only after the cheap job passes and
+  # skip draft pull requests.
+  unit-tests-macos:
+    needs: unit-tests
+    if: >-
+      inputs.macos-python-versions != '[]' &&
+      (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    runs-on: macos-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ${{ fromJSON(inputs.macos-python-versions) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: sowwic/gh-workflows/actions/setup-uv-project@v1
+        with:
+          python-version: ${{ matrix.python-version }}
+          python-version-file: ${{ inputs.python-version-file }}
+      - name: Run tests
+        shell: bash
+        env:
+          PYTHONFAULTHANDLER: "1"
+        run: ${{ inputs.test-command }}

@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      title:
+        description: Release title. Defaults to the tag annotation, else "<repo name> <tag>".
+        type: string
+        default: ""
+      changelog-path:
+        type: string
+        default: CHANGELOG.rst
+      build:
+        description: Run `uv build` and attach dist/* to the release.
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract release notes
+        env:
+          CHANGELOG: ${{ inputs.changelog-path }}
+        run: |
+          # Section body between the "<tag>" heading (+ underline) and the next "v<digit>" heading.
+          awk -v tag="$GITHUB_REF_NAME" '
+            $0 == tag { found = 1; getline; next }
+            found && /^v[0-9]/ { exit }
+            found { print }
+          ' "$CHANGELOG" | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > "$RUNNER_TEMP/notes.txt"
+          if [ ! -s "$RUNNER_TEMP/notes.txt" ]; then
+            echo "::error::No changelog entry found for $GITHUB_REF_NAME in $CHANGELOG"
+            exit 1
+          fi
+
+      - uses: astral-sh/setup-uv@v7
+        if: inputs.build
+      - name: Build
+        if: inputs.build
+        run: uv build
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ inputs.title }}
+        run: |
+          # Title precedence: workflow input, tag annotation (set by release.py), "<repo> <tag>".
+          tag_subject="$(git tag -l --format='%(contents:subject)' "$GITHUB_REF_NAME")"
+          title="${TITLE:-${tag_subject:-${GITHUB_REPOSITORY#*/} $GITHUB_REF_NAME}}"
+          args=("$GITHUB_REF_NAME" --verify-tag --notes-file "$RUNNER_TEMP/notes.txt"
+                --title "$title")
+          if [ "${{ inputs.build }}" = "true" ]; then args+=(dist/*); fi
+          gh release create "${args[@]}"

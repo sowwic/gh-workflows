@@ -1,0 +1,22 @@
+name: Python lint
+
+on:
+  workflow_call:
+    inputs:
+      command:
+        type: string
+        default: uv run ruff check src tests
+      python-version-file:
+        type: string
+        default: pyproject.toml
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: sowwic/gh-workflows/actions/setup-uv-project@v1
+        with:
+          python-version-file: ${{ inputs.python-version-file }}
+      - name: Lint
+        run: ${{ inputs.command }}
