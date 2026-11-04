@@ -7,6 +7,7 @@ Reference them as `sowwic/gh-workflows/.github/workflows/<name>.yml@v1`.
 | Workflow | Purpose | Main inputs |
 |---|---|---|
 | `python-tests.yml` | pytest matrix; cheap OSes first, macOS only after they pass and never on draft PRs | `os`, `python-versions`, `macos-python-versions` (`[]` skips macOS), `apt-packages`, `test-command` |
+| `maya-tests.yml` | Run tests in Maya on a self-hosted runner (only for packages that need it) | `runs-on` (JSON labels, default `maya-2026` macOS ARM64), `sync-args`, `test-command` (default `bash ./mayapy_test.sh`) |
 | `python-lint.yml` | Lint with a configurable command | `command` (default `uv run ruff check src tests`) |
 | `mkdocs-deploy.yml` | `mkdocs gh-deploy` | `command` |
 | `release.yml` | On tag push, create a GitHub release with notes from the changelog | `title`, `changelog-path`, `build` (attach `uv build` output) |

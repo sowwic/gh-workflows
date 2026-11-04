@@ -1,0 +1,29 @@
+name: Maya tests
+
+# Runs tests inside Maya (mayapy) on a self-hosted runner that has Maya
+# installed. Not every package needs this; use python-tests.yml for plain pytest.
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: JSON list of runner labels for the self-hosted Maya runner.
+        type: string
+        default: '["self-hosted", "macOS", "ARM64", "maya-2026"]'
+      sync-args:
+        description: Arguments passed to `uv sync`.
+        type: string
+        default: --locked --all-extras --dev
+      test-command:
+        description: Command that runs the tests through mayapy.
+        type: string
+        default: bash ./mayapy_test.sh
+
+jobs:
+  maya-tests:
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the project
+        run: uv sync ${{ inputs.sync-args }}
+      - name: Run Maya tests
+        run: ${{ inputs.test-command }}
