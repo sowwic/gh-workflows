@@ -22,7 +22,7 @@ jobs:
   maya-tests:
     runs-on: ${{ fromJSON(inputs.runs-on) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install the project
         run: uv sync ${{ inputs.sync-args }}
       - name: Run Maya tests

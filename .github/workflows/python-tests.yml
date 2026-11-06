@@ -37,7 +37,7 @@ jobs:
         os: ${{ fromJSON(inputs.os) }}
         python-version: ${{ fromJSON(inputs.python-versions) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: sowwic/gh-workflows/actions/setup-uv-project@v1
         with:
           python-version: ${{ matrix.python-version }}
@@ -62,7 +62,7 @@ jobs:
       matrix:
         python-version: ${{ fromJSON(inputs.macos-python-versions) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: sowwic/gh-workflows/actions/setup-uv-project@v1
         with:
           python-version: ${{ matrix.python-version }}
