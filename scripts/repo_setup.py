@@ -27,6 +27,78 @@ DELETION_RULESET = "Deletion"
 RELEASE_RULESET = "Main history"
 DEVELOP_RULESET = "Develop history"
 
+# The standard rulesets, as the rulesets API takes them. Edit them here to customize.
+# `{release_ref}` and `{develop_ref}` in a string become `refs/heads/<branch>`.
+ADMIN_BYPASS = [
+    {"actor_id": ADMIN_ROLE_ID, "actor_type": "RepositoryRole", "bypass_mode": "always"}
+]
+
+# Pull requests are required, with no approvals needed. Each ruleset adds its merge methods.
+PULL_REQUEST_PARAMETERS = {
+    "required_approving_review_count": 0,
+    "dismiss_stale_reviews_on_push": False,
+    "required_reviewers": [],
+    "require_code_owner_review": True,
+    "require_last_push_approval": False,
+    "required_review_thread_resolution": True,
+}
+
+RULESETS = [
+    {
+        "name": DELETION_RULESET,
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {"ref_name": {"include": ["{release_ref}", "{develop_ref}"], "exclude": []}},
+        "bypass_actors": [],
+        "rules": [{"type": "deletion"}],
+    },
+    {
+        "name": RELEASE_RULESET,
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {"ref_name": {"include": ["{release_ref}"], "exclude": []}},
+        "bypass_actors": ADMIN_BYPASS,
+        "rules": [
+            {"type": "non_fast_forward"},
+            {"type": "deletion"},
+            {
+                "type": "pull_request",
+                "parameters": {**PULL_REQUEST_PARAMETERS, "allowed_merge_methods": ["merge"]},
+            },
+        ],
+    },
+    {
+        # ~DEFAULT_BRANCH protects whichever branch is the default one.
+        "name": DEVELOP_RULESET,
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+        "bypass_actors": ADMIN_BYPASS,
+        "rules": [
+            {"type": "deletion"},
+            {"type": "non_fast_forward"},
+            {
+                "type": "pull_request",
+                "parameters": {
+                    **PULL_REQUEST_PARAMETERS,
+                    "allowed_merge_methods": ["merge", "squash", "rebase"],
+                },
+            },
+        ],
+    },
+]
+
+# Added to the ruleset named here when there are checks to require. A rule with no checks is
+# left out, the API may refuse it.
+CHECKS_RULESET = DEVELOP_RULESET
+CHECKS_RULE = {
+    "type": "required_status_checks",
+    "parameters": {
+        "strict_required_status_checks_policy": False,
+        "do_not_enforce_on_create": True,
+    },
+}
+
 
 class SetupError(Exception):
     pass
@@ -56,94 +128,48 @@ def gh_api(path: str, method: str = "GET", payload: dict | None = None):
 
 
 # Rulesets
+def fill(value, names: dict[str, str]):
+    """Copy of `value` with the `{...}` names of its strings replaced."""
+    if isinstance(value, str):
+        return value.format(**names)
+    if isinstance(value, list):
+        return [fill(item, names) for item in value]
+    if isinstance(value, dict):
+        return {key: fill(item, names) for key, item in value.items()}
+    return value
+
+
 def standard_rulesets(
     release_branch: str = "main",
     develop_branch: str = "develop",
     checks: list[dict] | None = None,
 ) -> list[dict]:
-    """The standard rulesets.
+    """The standard rulesets, made from `RULESETS`.
 
     Args:
         release_branch: name of the release branch.
         develop_branch: name of the develop branch.
-        checks: required status checks of the develop branch, as
+        checks: required status checks of `CHECKS_RULESET`, as
             `{"context": str, "integration_id": int | None}`. None or empty requires none.
 
     Returns:
         list[dict]: bodies for the rulesets API.
     """
-    admins = [
-        {"actor_id": ADMIN_ROLE_ID, "actor_type": "RepositoryRole", "bypass_mode": "always"}
-    ]
-
-    def pull_request(methods: list[str]) -> dict:
-        return {
-            "type": "pull_request",
-            "parameters": {
-                "required_approving_review_count": 0,
-                "dismiss_stale_reviews_on_push": False,
-                "required_reviewers": [],
-                "require_code_owner_review": True,
-                "require_last_push_approval": False,
-                "required_review_thread_resolution": True,
-                "allowed_merge_methods": methods,
-            },
-        }
-
-    def conditions(*include: str) -> dict:
-        return {"ref_name": {"include": list(include), "exclude": []}}
-
-    release_ref, develop_ref = f"refs/heads/{release_branch}", f"refs/heads/{develop_branch}"
-    develop_rules = [
-        {"type": "deletion"},
-        {"type": "non_fast_forward"},
-        pull_request(["merge", "squash", "rebase"]),
-    ]
-    if checks:
-        develop_rules.append(
-            {
-                "type": "required_status_checks",
-                "parameters": {
-                    "strict_required_status_checks_policy": False,
-                    "do_not_enforce_on_create": True,
-                    "required_status_checks": [
-                        {k: v for k, v in check.items() if v is not None}
-                        for check in checks
-                    ],
-                },
-            }
-        )
-    return [
-        {
-            "name": DELETION_RULESET,
-            "target": "branch",
-            "enforcement": "active",
-            "conditions": conditions(release_ref, develop_ref),
-            "bypass_actors": [],
-            "rules": [{"type": "deletion"}],
-        },
-        {
-            "name": RELEASE_RULESET,
-            "target": "branch",
-            "enforcement": "active",
-            "conditions": conditions(release_ref),
-            "bypass_actors": admins,
-            "rules": [
-                {"type": "non_fast_forward"},
-                {"type": "deletion"},
-                pull_request(["merge"]),
-            ],
-        },
-        {
-            # ~DEFAULT_BRANCH protects whichever branch is the default one.
-            "name": DEVELOP_RULESET,
-            "target": "branch",
-            "enforcement": "active",
-            "conditions": conditions("~DEFAULT_BRANCH"),
-            "bypass_actors": admins,
-            "rules": develop_rules,
-        },
-    ]
+    names = {
+        "release_ref": f"refs/heads/{release_branch}",
+        "develop_ref": f"refs/heads/{develop_branch}",
+    }
+    rulesets = []
+    for template in RULESETS:
+        ruleset = fill(template, names)
+        if checks and ruleset["name"] == CHECKS_RULESET:
+            rule = fill(CHECKS_RULE, names)
+            rule["parameters"]["required_status_checks"] = [
+                {k: v for k, v in check.items() if v is not None} for check in checks
+            ]
+            ruleset["rules"].append(rule)
+        rulesets.append(ruleset)
+    return rulesets
 
 
 def normalize(ruleset: dict) -> dict:
