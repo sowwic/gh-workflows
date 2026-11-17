@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Set up the GitHub side of a project: the repository, its branches and its rulesets.
 
-Two subcommands. Stdlib only, needs `git` and an authenticated `gh`.
+Three subcommands. Stdlib only, needs `git` and an authenticated `gh`.
 
 `init`            New project only. git init, `main` with an initial commit, `develop` at the
                   same commit, a GitHub repository, `develop` as its default branch, then the
@@ -9,6 +9,11 @@ Two subcommands. Stdlib only, needs `git` and an authenticated `gh`.
 `sync-rulesets`   Rulesets only. Creates or updates the standard rulesets of the repository.
                   It never creates, moves or deletes a branch, never changes the default
                   branch or any other repository setting. Safe for existing repositories.
+`setup-security`  Turns the settings of the repository's Advanced Security tab on or off:
+                  Dependabot alerts and security updates, secret scanning (with push
+                  protection, non-provider patterns and validity checks), private
+                  vulnerability reporting and code scanning (default setup). Dependabot
+                  version updates are configured by `.github/dependabot.yml`, not here.
 
 The rulesets are the standard set of these projects: `main` and `develop` cannot be
 deleted or force-pushed, and changes come in through pull requests.
@@ -397,6 +402,89 @@ def init_repo(
     )
 
 
+# Security
+# name -> (flag, default). The defaults are the settings the author's repositories use.
+SECURITY_OPTIONS = {
+    "dependabot-alerts": True,
+    "dependabot-security-updates": True,
+    "secret-scanning": True,
+    "push-protection": False,
+    "non-provider-patterns": False,
+    "validity-checks": False,
+    "private-reporting": True,
+    "code-scanning": False,
+}
+# Options that GitHub only accepts while another one is on.
+SECURITY_NEEDS = {
+    "dependabot-security-updates": "dependabot-alerts",
+    "push-protection": "secret-scanning",
+    "non-provider-patterns": "secret-scanning",
+    "validity-checks": "secret-scanning",
+}
+# secret scanning options, as the `security_and_analysis` object of the repository names them
+SECRET_SCANNING_KEYS = {
+    "secret-scanning": "secret_scanning",
+    "push-protection": "secret_scanning_push_protection",
+    "non-provider-patterns": "secret_scanning_non_provider_patterns",
+    "validity-checks": "secret_scanning_validity_checks",
+}
+
+
+def setup_security(
+    repo: str, options: dict[str, bool] | None = None, dry_run: bool = False
+) -> None:
+    """Turn the Advanced Security settings on or off. Touches nothing else.
+
+    `options` maps names of SECURITY_OPTIONS to on/off; missing ones take the default.
+    """
+    options = {**SECURITY_OPTIONS, **(options or {})}
+    for name, needed in SECURITY_NEEDS.items():
+        if options[name] and not options[needed]:
+            raise SetupError(
+                f"--{name} needs --{needed}=on (or turn --{name} off)."
+            )
+
+    def state(name: str) -> str:
+        return "on" if options[name] else "off"
+
+    def rest(name: str, endpoint: str) -> None:
+        print(f"==> {name}: {state(name)}")
+        if not dry_run:
+            gh_api(f"repos/{repo}/{endpoint}", "PUT" if options[name] else "DELETE")
+
+    # Dependabot security updates need the alerts: off goes first, on goes last.
+    if options["dependabot-alerts"]:
+        rest("dependabot-alerts", "vulnerability-alerts")
+        rest("dependabot-security-updates", "automated-security-fixes")
+    else:
+        rest("dependabot-security-updates", "automated-security-fixes")
+        rest("dependabot-alerts", "vulnerability-alerts")
+
+    for name in SECRET_SCANNING_KEYS:
+        print(f"==> {name}: {state(name)}")
+    if not dry_run:
+        gh_api(
+            f"repos/{repo}",
+            "PATCH",
+            {
+                "security_and_analysis": {
+                    key: {"status": "enabled" if options[name] else "disabled"}
+                    for name, key in SECRET_SCANNING_KEYS.items()
+                }
+            },
+        )
+
+    rest("private-reporting", "private-vulnerability-reporting")
+
+    print(f"==> code-scanning: {state('code-scanning')}")
+    if not dry_run:
+        gh_api(
+            f"repos/{repo}/code-scanning/default-setup",
+            "PATCH",
+            {"state": "configured" if options["code-scanning"] else "not-configured"},
+        )
+
+
 def current_repo() -> str:
     """`owner/name` of the repository in the current folder."""
     return run(["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"])
@@ -421,6 +509,19 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--checks", help="comma separated required checks of develop")
             command.add_argument("--prune", action="store_true", help="delete other rulesets")
             command.add_argument("--yes", action="store_true", help="do not ask before pruning")
+    security = sub.add_parser(
+        "setup-security", help="turn the Advanced Security settings on or off"
+    )
+    security.add_argument("--repo", help="owner/name (default: from the folder)")
+    security.add_argument("--dry-run", action="store_true", help="print only")
+    for name, default in SECURITY_OPTIONS.items():
+        security.add_argument(
+            f"--{name}",
+            dest=name.replace("-", "_"),
+            choices=("on", "off"),
+            default="on" if default else "off",
+            help=f"default: {'on' if default else 'off'}",
+        )
     args = parser.parse_args(argv)
 
     try:
@@ -431,6 +532,12 @@ def main(argv: list[str] | None = None) -> int:
                 args.develop_branch,
                 args.private,
                 args.message,
+                args.dry_run,
+            )
+        elif args.command == "setup-security":
+            setup_security(
+                args.repo or current_repo(),
+                {name: getattr(args, name.replace("-", "_")) == "on" for name in SECURITY_OPTIONS},
                 args.dry_run,
             )
         else:

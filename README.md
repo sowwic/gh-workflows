@@ -58,7 +58,7 @@ It errors if the changelog has no `v1.2.3` entry, you are not on the release bra
 ## Repository setup: `scripts/repo_setup.py`
 
 Sets up the GitHub side of a project. Stdlib only, needs `git` and an authenticated `gh` (the `repo` scope).
-Two subcommands that do not overlap:
+Three subcommands that do not overlap:
 
 ```sh
 # New project only: main + develop at one commit, GitHub repo, develop as default branch, rulesets
@@ -66,6 +66,12 @@ python scripts/repo_setup.py init [--repo owner/name] [--private] [--release-bra
 
 # Rulesets only: never creates, moves or deletes a branch, never changes the default branch or any setting
 python scripts/repo_setup.py sync-rulesets [--repo owner/name] [--checks "a,b"] [--prune [--yes]] [--dry-run]
+
+# Advanced Security tab settings, each on|off (defaults are the standard settings of these projects):
+#   --dependabot-alerts on, --dependabot-security-updates on, --secret-scanning on, --push-protection off,
+#   --non-provider-patterns off, --validity-checks off, --private-reporting on, --code-scanning off (default setup)
+# Dependabot version updates come from .github/dependabot.yml, not from here
+python scripts/repo_setup.py setup-security [--repo owner/name] [--dependabot-alerts on|off] [--secret-scanning on|off] [...] [--dry-run]
 ```
 
 `init` refuses a folder that already has commits or an `origin` remote. It runs `git init -b main`, makes the

@@ -263,5 +263,85 @@ class InitRepoTests(unittest.TestCase):
         self.assertIn("sync-rulesets", str(raised.exception))
 
 
+class SetupSecurityTests(unittest.TestCase):
+    def run_setup(self, options=None, dry_run=False):
+        with mock.patch.object(repo_setup, "gh_api") as gh_api, contextlib.redirect_stdout(
+            io.StringIO()
+        ) as out:
+            repo_setup.setup_security("me/proj", options, dry_run)
+        return [c.args for c in gh_api.call_args_list], out.getvalue()
+
+    def test_defaults_are_the_standard_settings(self):
+        calls, _ = self.run_setup()
+        self.assertEqual(
+            calls,
+            [
+                ("repos/me/proj/vulnerability-alerts", "PUT"),
+                ("repos/me/proj/automated-security-fixes", "PUT"),
+                (
+                    "repos/me/proj",
+                    "PATCH",
+                    {
+                        "security_and_analysis": {
+                            "secret_scanning": {"status": "enabled"},
+                            "secret_scanning_push_protection": {"status": "disabled"},
+                            "secret_scanning_non_provider_patterns": {"status": "disabled"},
+                            "secret_scanning_validity_checks": {"status": "disabled"},
+                        }
+                    },
+                ),
+                ("repos/me/proj/private-vulnerability-reporting", "PUT"),
+                ("repos/me/proj/code-scanning/default-setup", "PATCH", {"state": "not-configured"}),
+            ],
+        )
+
+    def test_turning_alerts_off_starts_with_security_updates(self):
+        calls, _ = self.run_setup(
+            {"dependabot-alerts": False, "dependabot-security-updates": False}
+        )
+        self.assertEqual(
+            calls[:2],
+            [
+                ("repos/me/proj/automated-security-fixes", "DELETE"),
+                ("repos/me/proj/vulnerability-alerts", "DELETE"),
+            ],
+        )
+
+    def test_options_toggle(self):
+        calls, _ = self.run_setup(
+            {"push-protection": True, "private-reporting": False, "code-scanning": True}
+        )
+        patch = calls[2][2]["security_and_analysis"]
+        self.assertEqual(patch["secret_scanning_push_protection"], {"status": "enabled"})
+        self.assertEqual(calls[3], ("repos/me/proj/private-vulnerability-reporting", "DELETE"))
+        self.assertEqual(calls[4][2], {"state": "configured"})
+
+    def test_dependent_options_need_their_parent(self):
+        for options in (
+            {"dependabot-alerts": False},
+            {"secret-scanning": False, "push-protection": True},
+        ):
+            with self.assertRaises(repo_setup.SetupError):
+                self.run_setup(options)
+
+    def test_dry_run_calls_nothing(self):
+        calls, out = self.run_setup(dry_run=True)
+        self.assertEqual(calls, [])
+        self.assertIn("secret-scanning: on", out)
+
+    def test_flags_are_parsed(self):
+        with mock.patch.object(repo_setup, "setup_security") as setup:
+            repo_setup.main(
+                ["setup-security", "--repo", "me/proj", "--dependabot-alerts=off",
+                 "--dependabot-security-updates=off", "--code-scanning=on"]
+            )
+        repo, options, dry_run = setup.call_args.args
+        self.assertEqual(repo, "me/proj")
+        self.assertFalse(options["dependabot-alerts"])
+        self.assertTrue(options["code-scanning"])
+        self.assertTrue(options["secret-scanning"])
+        self.assertFalse(dry_run)
+
+
 if __name__ == "__main__":
     unittest.main()
